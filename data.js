@@ -1,60 +1,83 @@
-/* 사이트 내용 데이터 — 여기만 고치면 화면에 반영된다.
-   - CHARS[].img / CONCEPTS[].img 에 그림 경로(예: "img/char-01.webp")를 넣으면 임시 그림 대신 실제 그림이 나온다.
-   - CHARS[].name 등의 문구는 임시 문구다. 정해지면 바꿔 넣는다. */
+/* 내용 데이터 — 화면에 나오는 문구·그림 경로는 여기만 고치면 된다.
+   img 가 비어 있으면 코드로 만든 임시 일러스트가 나온다. 경로를 넣으면(예: "img/char-01.webp")
+   그 그림이 나오고, 파일이 없거나 깨지면 자동으로 임시 일러스트로 되돌아간다. */
 (function () {
   'use strict';
-  const pad = (n) => String(n).padStart(2, '0');
+  var pad = function (n) { return String(n).padStart(2, '0'); };
 
-  const NAV = [
-    { r: 'main',    ko: '메인',    en: 'HOME',      icon: 'i-home' },
-    { r: 'select',  ko: '캐릭터',  en: 'CHARACTER', icon: 'i-char' },
-    { r: 'gallery', ko: '컨셉아트', en: 'CONCEPT',   icon: 'i-art' },
-    { r: 'notice',  ko: '공지',    en: 'NOTICE',    icon: 'i-note' },
-  ];
+  var characters = [];
+  for (var i = 1; i <= 6; i++) {
+    characters.push({
+      id: i,
+      code: 'CH-' + pad(i),
+      name: '캐릭터 ' + pad(i),
+      en: 'CHARACTER ' + pad(i),
+      short: '소개문이 들어갈 자리입니다.',
+      intro: [
+        '소개문이 들어갈 자리입니다.',
+        '설정이 정해지면 이 문단이 캐릭터 소개문으로 바뀝니다.',
+        '임시 문구이므로 내용에 의미는 없습니다.'
+      ],
+      specs: [['역할', '임시 문구'], ['소속', '임시 문구'], ['특기', '임시 문구']],
+      img: '' // 예: 'img/char-01.webp'
+    });
+  }
 
-  const CHARS = Array.from({ length: 6 }, (_, i) => ({
-    id: i + 1,
-    code: 'CH-' + pad(i + 1),
-    ko: '캐릭터 ' + pad(i + 1),
-    en: 'CHARACTER ' + pad(i + 1),
-    role: '소속·역할 미정',
-    lines: [
-      '캐릭터 소개문이 들어갈 자리입니다.',
-      '설정이 정해지면 이 문단이 소개문으로 바뀝니다.',
-    ],
-    img: null,
-  }));
+  var concept = [];
+  for (var j = 1; j <= 15; j++) {
+    concept.push({ id: j, title: '컨셉아트 ' + pad(j), img: '' });
+  }
 
-  const CONCEPTS = Array.from({ length: 15 }, (_, i) => ({
-    id: i + 1,
-    title: 'CONCEPT ' + pad(i + 1),
-    img: null,
-  }));
-
-  const PATCHES = [
+  var notices = [
+    {
+      v: 'Patch v-2.0.0',
+      date: '2026-11-07',
+      badge: '대규모 업데이트',
+      summary: '사이트를 처음부터 다시 설계했습니다.',
+      groups: [
+        { h: '신규', items: [
+          '캐릭터 선택 창 — 소개를 볼 캐릭터를 직접 고른 뒤 입장',
+          '컨셉아트 갤러리 — 15점, 스크롤로 열람, 작은 그림 2점과 큰 그림 1점 반복 배치',
+          '메인화면 — 좌측 텍스트 메뉴와 우측 상단 메인 메뉴 아이콘',
+          '캐릭터 소개 페이지 — 선택한 캐릭터를 크게 세운 소개 화면',
+          '공지 화면 — 패치 이력 열람'
+        ] },
+        { h: '변경', items: [
+          '전체 디자인을 금색 × 검정 인더스트리얼 스타일로 교체',
+          '화면이 바뀔 때 셔터 전환 연출, 본문은 글자 단위로 등장'
+        ] },
+        { h: '개선', items: [
+          '모바일 360px 폭 지원, 터치 전용 기기에서도 모든 기능 사용 가능',
+          '키보드 조작과 동작 줄이기 설정 대응'
+        ] },
+        { h: '안내', items: [
+          '캐릭터 이름·소개문·그림은 임시입니다. 확정되면 교체됩니다.'
+        ] }
+      ]
+    },
     {
       v: 'Patch v-1.0.1',
       date: '2026-11-07',
-      items: [
+      groups: [{ h: '변경', items: [
         '제목 글자를 금속 그라디언트에서 단색 금색으로 변경',
         '글꼴을 2종으로 정리하고 작은 글자를 키움',
         '배경 금가루를 줄여 화면을 정돈',
-        '임시 캐릭터 그림 6종이 서로 다르게 보이도록 수정',
-      ],
+        '임시 캐릭터 그림 6종이 서로 다르게 보이도록 수정'
+      ] }]
     },
     {
       v: 'Patch v-1.0.0',
       date: '2026-11-07',
-      items: [
+      groups: [{ h: '신규', items: [
         '메인 화면 추가 — 캐릭터 캐러셀, 좌측 메뉴, 우측 상단 메뉴',
         '캐릭터 선택 창 추가',
         '캐릭터 소개 페이지 추가',
         '컨셉아트 갤러리 추가 — 15장, 스크롤로 열람',
         '화면 전환 애니메이션 추가',
-        '모바일 화면 지원',
-      ],
-    },
+        '모바일 화면 지원'
+      ] }]
+    }
   ];
 
-  window.RC = { NAV, CHARS, CONCEPTS, PATCHES };
+  window.RC_DATA = { characters: characters, concept: concept, notices: notices };
 })();
