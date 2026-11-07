@@ -321,7 +321,7 @@ html.menu-open .menu-list li, html.menu-open .menu-chars li { opacity: 1; transf
 .plate { position: relative; display: block; min-width: 0; aspect-ratio: 16 / 9; }
 .plate.big { grid-column: 1 / -1; }
 .pl-in { position: absolute; inset: 0; overflow: hidden; background: var(--obsidian); clip-path: inset(0 100% 0 0); }
-.plate.in .pl-in { clip-path: inset(0 0 0 0); transition: clip-path .8s var(--ease-io); }
+.plate.in .pl-in { clip-path: inset(0 0 0 0); transition: clip-path .8s var(--ease-io), transform .12s var(--ease); }
 .pl-in img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scale(1.08); transition: transform 1.1s var(--ease); }
 .plate.in .pl-in img { transform: none; }
 .pl-frame { position: absolute; inset: 0; border: 1px solid rgba(212, 167, 58, .38); pointer-events: none; transition: border-color .2s; }
@@ -373,6 +373,113 @@ html.menu-open .menu-list li, html.menu-open .menu-chars li { opacity: 1; transf
 /* ---------- 오류 화면 ---------- */
 .err { min-height: 100svh; display: grid; align-content: center; justify-items: start; gap: 16px; padding: 96px 16px; max-width: 640px; margin: 0 auto; }
 
+/* =====================================================================
+   v-2.1.0 모션 레이어 — 규칙: transform / opacity / clip-path 만. 길이는 motion.js 의 MOTION 에서 변수로 받는다.
+   ===================================================================== */
+:root { --m-breath: 5600ms; --m-sweep: 640ms; --m-breath-y: 1.014; --m-breath-x: 1.006; --par-fig-x: 12px; --par-fig-y: 5px; }
+@media (pointer: coarse) { :root { --par-fig-x: 20px; } }
+html.intro-on { overflow: hidden; }
+
+/* ---------- 입장 인트로 ---------- */
+.intro { position: fixed; inset: 0; z-index: 90; overflow: hidden; }
+.in-half { position: absolute; left: 0; right: 0; height: calc(50% + 1px); background: var(--void); }
+.in-top { top: 0; border-bottom: 1px solid var(--gold-900); }
+.in-bot { bottom: 0; border-top: 1px solid var(--gold-900); }
+.in-bloom { position: absolute; left: calc(50% - min(60vw, 360px)); top: calc(50% - min(60vw, 360px)); width: min(120vw, 720px); height: min(120vw, 720px); border-radius: 50%; background: radial-gradient(circle, rgba(212, 167, 58, .2) 0, rgba(212, 167, 58, 0) 62%); opacity: 0; pointer-events: none; }
+.in-line { position: absolute; top: 50%; left: calc(50% - min(35vw, 280px)); width: min(70vw, 560px); height: 1px; background: var(--gold-500); transform: scaleX(0); pointer-events: none; }
+.in-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; color: var(--gold-300); pointer-events: none; }
+.in-seal { width: min(44vw, 160px); height: auto; display: block; overflow: visible; }
+.in-word { font-family: var(--f-label); font-weight: 700; font-size: var(--t-20); letter-spacing: .4em; padding-left: .4em; color: var(--ink); line-height: 1.4; white-space: nowrap; }
+.in-word span { display: inline-block; }
+.in-skip { position: absolute; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); min-width: 96px; min-height: 48px; padding: 0 16px; border: 1px solid var(--gold-700); color: var(--gold-300); background: var(--void); font-family: var(--f-label); font-size: var(--t-13); font-weight: 600; letter-spacing: .16em; }
+.in-skip:active { background: var(--gold-900); }
+@media (hover: hover) { .in-skip:hover { background: var(--gold-900); border-color: var(--gold-300); } }
+
+/* ---------- 캐릭터: 숨쉬기 · 시차 · 홀로그램 스캔 ---------- */
+@keyframes breathe { from { transform: scale(1, 1); } to { transform: scale(var(--m-breath-x), var(--m-breath-y)); } }
+.m-fig.on img, .c-fig img { transform-origin: 50% 100%; animation: breathe var(--m-breath) ease-in-out infinite alternate; }
+.m-fig img { translate: calc(var(--px, 0) * var(--par-fig-x)) calc(var(--py, 0) * var(--par-fig-y)); }
+.m-fig::before { translate: calc(var(--px, 0) * -8px) 0; }
+.m-fig::after { translate: calc(var(--px, 0) * -14px) 0; }
+.sigil { translate: calc(var(--px, 0) * -10px) calc(var(--py, 0) * -6px); }
+.c-fig { translate: calc(var(--px, 0) * 16px) calc(var(--py, 0) * 6px); }
+.c-line { translate: calc(var(--px, 0) * -14px) 0; }
+.c-line.l2 { translate: calc(var(--px, 0) * -22px) 0; }
+.c-ghost { translate: calc(var(--px, 0) * -8px) 0; }
+.c-stage { touch-action: pan-y; }
+.fx-sweep { position: absolute; left: 12%; right: 12%; top: 0; height: 1px; background: var(--gold-300); opacity: 0; pointer-events: none; z-index: 3; }
+.fx-dust { position: absolute; left: 0; top: 0; pointer-events: none; overflow: hidden; }
+.fx-dust i { position: absolute; bottom: 0; width: 2px; height: 2px; background: var(--gold-300); opacity: 0; animation: dustUp var(--dur, 20s) linear infinite; animation-delay: var(--dl, 0s); }
+.fx-dust.idle i { animation-play-state: paused; }
+@keyframes dustUp {
+  0% { transform: translate3d(0, 0, 0); opacity: 0; }
+  14% { opacity: var(--a, .3); }
+  86% { opacity: var(--a, .3); }
+  100% { transform: translate3d(var(--dx, 0), calc(var(--h, 600) * -1px), 0); opacity: 0; }
+}
+.screen.entering .sg-draw { stroke-dasharray: 1; animation: draw 1.4s var(--ease) backwards; animation-delay: var(--d, 0s); }
+.screen.entering .c-band { animation: bandIn .9s var(--ease) backwards .1s; }
+.screen.entering .c-line { animation: bandIn .9s var(--ease) backwards .2s; }
+.screen.entering .c-line.l2 { animation-delay: .3s; }
+@keyframes bandIn { from { opacity: 0; transform: translateX(14%); } to { opacity: 1; transform: none; } }
+
+/* ---------- 선택 카드: 등장 · 조준 표식 · 시차 ---------- */
+.screen.entering .card { animation: cardIn .6s var(--ease) backwards; animation-delay: calc(var(--k, 0) * 60ms + 200ms); }
+@keyframes cardIn { from { opacity: 0; transform: translateY(32px); } to { opacity: 1; transform: none; } }
+.card::before { content: ""; position: absolute; inset: -6px; z-index: 2; pointer-events: none; opacity: 0;
+  background:
+    linear-gradient(var(--gold-300), var(--gold-300)) 0 0 / 16px 1px no-repeat, linear-gradient(var(--gold-300), var(--gold-300)) 0 0 / 1px 16px no-repeat,
+    linear-gradient(var(--gold-300), var(--gold-300)) 100% 0 / 16px 1px no-repeat, linear-gradient(var(--gold-300), var(--gold-300)) 100% 0 / 1px 16px no-repeat,
+    linear-gradient(var(--gold-300), var(--gold-300)) 0 100% / 16px 1px no-repeat, linear-gradient(var(--gold-300), var(--gold-300)) 0 100% / 1px 16px no-repeat,
+    linear-gradient(var(--gold-300), var(--gold-300)) 100% 100% / 16px 1px no-repeat, linear-gradient(var(--gold-300), var(--gold-300)) 100% 100% / 1px 16px no-repeat; }
+.card[aria-pressed="true"]::before { opacity: 1; animation: lock .36s var(--ease) backwards; }
+@keyframes lock { from { opacity: 0; transform: scale(1.1); } to { opacity: 1; transform: none; } }
+.card[aria-pressed="true"] .art img { translate: calc(var(--px, 0) * 8px) calc(var(--py, 0) * 4px); }
+.card { transition: transform .12s var(--ease); }
+.card:active { transform: scale(.985); }
+@media (min-width: 1024px) { .card { transition: flex-grow .55s var(--ease), transform .12s var(--ease); } }
+
+/* ---------- 버튼 · 아이콘 누름 피드백(터치는 :active, 호버 기기는 :hover 추가) ---------- */
+.btn { transition: background .2s, transform .12s var(--ease); }
+.sq { transition: background .2s, border-color .2s, transform .12s var(--ease); }
+.menu-btn { transition: border-color .2s, background .2s, transform .12s var(--ease); }
+.btn:active { transform: scale(.97); }
+.sq:active, .menu-btn:active { transform: scale(.93); }
+.btn .ico { transition: transform .2s var(--ease); }
+.btn:active .ico { transform: translateX(4px); }
+@media (hover: hover) { .btn:hover .ico { transform: translateX(4px); } }
+.rail a:active .ico { transform: scale(.9); }
+.rail .ico { transition: transform .12s var(--ease); }
+.m-thumbs button { transition: border-color .2s, transform .12s var(--ease); }
+.m-thumbs button:active { transform: scale(.94); }
+.menu-list a, .menu-chars a { transition: background .2s, transform .12s var(--ease); }
+.menu-list a:active, .menu-chars a:active { background: var(--gold-900); transform: translateX(-4px); }
+.menu-list a[aria-current="page"]:active { background: var(--gold-500); }
+.pl-in { transition: transform .12s var(--ease); }
+.plate:active .pl-in { transform: scale(.985); }
+.plate:active .pl-frame { border-color: var(--gold-300); }
+
+/* ---------- 메뉴: 금빛 모서리 선이 위에서 아래로 그어진다 ---------- */
+.menu::before { transform-origin: 50% 0; transform: scaleY(0); transition: transform .3s var(--ease-io); }
+html.menu-open .menu::before { transform: none; transition: transform .55s var(--ease-io) .18s; }
+
+/* ---------- 공지: 접고 펴기(JS 가 transform/clip-path 로 구동) ---------- */
+.patch.closing .ptog::before { transform: translateY(-3px) rotate(45deg); }
+.patch.closing::before { background: var(--void); }
+
+/* ---------- 라이트박스 ---------- */
+.lb-bar { background: var(--void); }
+.lb.lb-fly { overflow: visible; background: transparent; }
+.lb[open]::backdrop { animation: lbIn .3s ease-out backwards; }
+.lb.lb-closing::backdrop { animation: lbOut .32s ease-in forwards; }
+@keyframes lbIn { from { opacity: 0; } }
+@keyframes lbOut { to { opacity: 0; } }
+
+/* ---------- 성능 안전망: 느린 기기에서 JS 가 fx-lite 를 켜면 상시 움직임을 끈다 ---------- */
+html.fx-lite .m-fig.on img, html.fx-lite .c-fig img, html.fx-lite .m-scan { animation: none; }
+html.fx-lite .fx-dust { display: none; }
+html.fx-lite1 .fx-dust i:nth-child(2n) { display: none; }
+
 /* ---------- 접근성: 모션 줄이기 / 탭 숨김 ---------- */
 html[data-hidden] *, html[data-hidden] *::before, html[data-hidden] *::after { animation-play-state: paused !important; }
 @media (prefers-reduced-motion: reduce) {
@@ -380,4 +487,7 @@ html[data-hidden] *, html[data-hidden] *::before, html[data-hidden] *::after { a
   .sg-spin, .m-scan { animation: none !important; }
   .m-scan { display: none; }
   .pl-in { clip-path: none !important; }
+  .m-fig.on img, .c-fig img { animation: none !important; }
+  .fx-sweep, .fx-dust { display: none !important; }
+  .m-fig img, .m-fig::before, .m-fig::after, .sigil, .c-fig, .c-line, .c-ghost, .card .art img { translate: none !important; }
 }

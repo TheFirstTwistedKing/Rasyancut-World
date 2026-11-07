@@ -208,9 +208,9 @@
       s += '<path d="M' + f(400 + Math.cos(an) * 372) + ' ' + f(400 + Math.sin(an) * 372) + 'L' + f(400 + Math.cos(an) * r2) + ' ' + f(400 + Math.sin(an) * r2) + '"/>';
     }
     s += '</g>';
-    s += '<path d="M400 36 L744 400 L400 764 L56 400Z" stroke-width="1.6" opacity=".85"/><path d="M400 116 L664 400 L400 684 L136 400Z" stroke-width="1" opacity=".5"/>';
-    s += '<path d="M400 0 V800 M0 400 H800" stroke-width="1" opacity=".22"/>';
-    s += '<path d="M30 424 L250 424 L292 378 M770 424 L550 424 L508 378" stroke-width="3" stroke="' + G3 + '"/>';
+    s += '<path class="sg-draw" pathLength="1" d="M400 36 L744 400 L400 764 L56 400Z" stroke-width="1.6" opacity=".85"/><path class="sg-draw" pathLength="1" style="--d:.15s" d="M400 116 L664 400 L400 684 L136 400Z" stroke-width="1" opacity=".5"/>';
+    s += '<path class="sg-draw" pathLength="1" style="--d:.3s" d="M400 0 V800 M0 400 H800" stroke-width="1" opacity=".22"/>';
+    s += '<path class="sg-draw" pathLength="1" style="--d:.45s" d="M30 424 L250 424 L292 378 M770 424 L550 424 L508 378" stroke-width="3" stroke="' + G3 + '"/>';
     s += '<path d="M120 400 L196 400 M604 400 L680 400" stroke-width="1" stroke="' + G3 + '" opacity=".6"/>';
     s += '<path d="M400 36 V74 M400 726 V764" stroke-width="3" stroke="' + G3 + '"/>';
     s += '</svg>';
