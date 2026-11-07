@@ -1,308 +1,500 @@
+/* 라시안컷 월드 — 라우터·화면·전환.
+   설계 원칙(적대적): 어떤 입력 순서로 눌러도 "마지막 해시"로 수렴한다 / 화면 하나가 죽어도 사이트는 산다 /
+   등장 연출은 관찰 대상이 아닌 안쪽 요소에 건다 / 전환은 언제든 시간 제한(워치독)으로 풀린다. */
 (function () {
   'use strict';
-  const { NAV, CHARS, CONCEPTS, PATCHES } = window.RC;
-  const $ = (s, r = document) => r.querySelector(s);
-  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const pad = (n) => String(n).padStart(2, '0');
-  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const icon = (id, cls = '') => `<svg class="${cls}" aria-hidden="true"><use href="#${id}"/></svg>`;
 
-  /* ── 그림: 실제 이미지가 있으면 그것을, 없으면 임시 일러스트 ── */
-  const charArt = (c) => (c.img ? `<img class="art" src="${esc(c.img)}" alt="${esc(c.ko)}" style="object-fit:cover">` : RCArt.char(c.id));
-  const conceptArt = (c) => (c.img ? `<img class="art" src="${esc(c.img)}" alt="${esc(c.title)}" loading="lazy" style="object-fit:cover">` : RCArt.concept(c.id - 1));
+  var D = window.RC_DATA, A = window.RC_ART;
+  var root = document.documentElement;
+  var $ = function (id) { return document.getElementById(id); };
+  var view = $('view'), menu = $('menu'), menuBtn = $('menuBtn'), curtain = $('curtain'), slats = [].slice.call($('slats').children);
+  var live = $('live'), hudWhere = $('hudWhere');
+  var reduceMQ = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
 
-  /* ── 글자 애니메이션 ── */
-  function splitText(el, base, step) {
-    const t = el.textContent;
-    el.setAttribute('aria-label', t);
-    let n = 0;
-    el.innerHTML = t.split(/(\s+)/).map((w) => (/^\s+$/.test(w) ? ' ' :
-      `<span class="w" aria-hidden="true">${[...w].map((c) => `<span class="ch" style="--d:${base + (n++) * step}ms">${esc(c)}</span>`).join('')}</span>`)).join('');
+  var state = { main: 0, sel: 0 };
+  var current = null, rendered = null, busy = false, navCount = 0;
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function frames(n) { return new Promise(function (r) { var k = function () { if (--n <= 0) r(); else requestAnimationFrame(k); }; requestAnimationFrame(k); setTimeout(r, 120 * n); }); }
+  function reduced() { return !!reduceMQ.matches; }
+  function mod(n, m) { return ((n % m) + m) % m; }
+
+  /* ---------- 그림 경로: img 필드가 있으면 쓰고, 없거나 깨지면 임시 일러스트 ---------- */
+  var memo = {};
+  function fallbackSrc(kind, id) {
+    var k = kind + id;
+    if (!memo[k]) memo[k] = kind === 'char' ? A.figureURI(id) : A.conceptURI(id);
+    return memo[k];
   }
-  function play(root) {
-    let i = 0;
-    $$('[data-type]', root).forEach((el) => {
-      const d = el.dataset.delay !== undefined ? +el.dataset.delay : 250 + i * 160;
-      i++;
-      if (!reduce) splitText(el, d, 16);
-    });
-    $$('[data-wipe]', root).forEach((el) => {
-      el.style.setProperty('--d', (el.dataset.delay || 150) + 'ms');
-      if (!reduce) el.classList.add('wipe');
-    });
-    $$('[data-rise]', root).forEach((el, k) => {
-      el.style.setProperty('--d', (el.dataset.delay !== undefined ? +el.dataset.delay : 500 + k * 110) + 'ms');
-      if (!reduce) el.classList.add('rise');
-    });
+  function src(kind, item) { return item.img ? item.img : fallbackSrc(kind, item.id); }
+  function imgTag(kind, item, cls, alt, extra) {
+    return '<img class="' + (cls || '') + '" src="' + esc(src(kind, item)) + '" alt="' + esc(alt || '') + '" data-kind="' + kind + '" data-id="' + item.id + '" decoding="async" draggable="false"' + (extra || '') + '>';
   }
-
-  /* ── 화면 렌더링 ── */
-  const EMBLEM = [
-    '<circle cx="19" cy="19" r="6"/><path d="M19 7v6M19 25v6M7 19h6M25 19h6"/>',
-    '<path d="M19 7l10 12-10 12L9 19z"/><circle cx="19" cy="19" r="3"/>',
-    '<path d="M9 28l10-20 10 20z"/><path d="M14 22h10"/>',
-    '<circle cx="19" cy="19" r="10"/><path d="M12 12l14 14M26 12L12 26"/>',
-    '<path d="M10 12h18M10 19h18M10 26h18"/><circle cx="19" cy="19" r="9"/>',
-    '<path d="M19 6c8 4 8 22 0 26-8-4-8-22 0-26z"/><path d="M19 12v14"/>',
-  ];
-  const emblem = (i) => `<svg viewBox="0 0 38 38" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><rect x="2" y="2" width="34" height="34" opacity=".55"/>${EMBLEM[i % EMBLEM.length]}</svg>`;
-
-  const VIEWS = {
-    main() {
-      const slides = CHARS.map((c, i) => `<div class="hero-slide${i ? '' : ' on'}" data-i="${i}">${charArt(c)}</div>`).join('');
-      const dots = CHARS.map((_, i) => `<i class="${i ? '' : 'on'}"></i>`).join('');
-      return `<div class="hero">
-        <div class="hero-copy">
-          <p class="kicker mono" data-type>Sanctuary of all creations</p>
-          <h1 class="gold-title" data-wipe>라시안컷</h1>
-          <p class="lead" data-type data-delay="500">모든 창조물들의 성소</p>
-          <p class="sub" data-type data-delay="900">빛과 어둠이 맞물리는 세계의 기록을 펼쳐 봅니다.</p>
-          <div class="cta" data-rise data-delay="1500">
-            <a class="btn" href="#/select">캐릭터 보기 ${icon('i-next')}</a>
-            <a class="btn ghost" href="#/gallery">컨셉아트</a>
-          </div>
-        </div>
-        <div class="hero-art" data-rise data-delay="300">
-          <div class="hero-frame"></div>
-          <div class="hero-stage">${slides}</div>
-          <div class="hero-dots" aria-hidden="true">${dots}</div>
-          <button class="hero-nav prev" type="button" aria-label="이전 캐릭터">${icon('i-prev')}</button>
-          <button class="hero-nav next" type="button" aria-label="다음 캐릭터">${icon('i-next')}</button>
-          <div class="hero-info">
-            <div><div class="hero-count" id="heroCount"></div><span class="hero-name" id="heroName" aria-live="polite"></span></div>
-            <a class="hero-more" id="heroMore" href="#/char/1">자세히 보기 →</a>
-          </div>
-        </div>
-      </div>`;
-    },
-    select() {
-      const cards = CHARS.map((c, i) => `<a class="ccard" style="--i:${i}" href="#/char/${c.id}" aria-label="${esc(c.ko)} 소개 보기">
-        <span class="cc-in">
-          <span class="cc-art">${charArt(c)}</span>
-          <span class="cc-no mono">${pad(c.id)}</span>
-          <span class="cc-meta">${emblem(i)}<b>${esc(c.ko)}</b><small>${esc(c.en)}</small></span>
-        </span></a>`).join('');
-      return `<div class="select">
-        <header class="sec-head">
-          <p class="kicker mono" data-type>Select · Character</p>
-          <h2 class="gold-title" data-wipe>캐릭터 선택</h2>
-          <p class="sub" data-type data-delay="700">소개를 볼 캐릭터를 골라 주세요.</p>
-        </header>
-        <div class="cards" role="list">${cards}</div>
-      </div>`;
-    },
-    char(id) {
-      const n = CHARS.length, i = Math.min(Math.max(id, 1), n) - 1, c = CHARS[i];
-      const prev = CHARS[(i + n - 1) % n].id, next = CHARS[(i + 1) % n].id;
-      const lines = c.lines.map((l, k) => `<p data-type data-delay="${900 + k * 500}">${esc(l)}</p>`).join('');
-      return `<div class="intro">
-        <div class="intro-copy">
-          <p class="kicker mono" data-type>The Character · ${esc(c.code)}</p>
-          <h2 class="gold-title" data-wipe data-delay="200">${esc(c.ko)}</h2>
-          <p class="en mono" data-type data-delay="600">${esc(c.en)}</p>
-          <div class="rule" aria-hidden="true"><i></i><i></i><i></i><b></b></div>
-          <div class="intro-lines">${lines}</div>
-          <dl class="readout mono" data-rise data-delay="1500">
-            <dt>ID</dt><dd>${esc(c.code)}</dd><dt>ROLE</dt><dd>${esc(c.role)}</dd><dt>SEC</dt><dd>R.S.S. / ${pad(c.id)}</dd>
-          </dl>
-          <div class="intro-nav" data-rise data-delay="1700">
-            <a class="btn ghost" href="#/char/${prev}" aria-label="이전 캐릭터">${icon('i-prev')}이전</a>
-            <a class="btn ghost" href="#/select">목록</a>
-            <a class="btn" href="#/char/${next}" aria-label="다음 캐릭터">다음${icon('i-next')}</a>
-          </div>
-        </div>
-        <div class="intro-art">
-          <div class="band"></div>
-          <div class="art-wrap">${charArt(c)}</div>
-          ${c.img ? '' : '<span class="ph-tag mono">Illustration · placeholder</span>'}
-          <div class="intro-count" aria-hidden="true">${pad(c.id)}<small>/ ${pad(n)}</small></div>
-        </div>
-      </div>`;
-    },
-    gallery() {
-      const tiles = CONCEPTS.map((c, i) => `<button class="tile${i % 3 === 2 ? ' big' : ''}" type="button" data-i="${i}" aria-label="${esc(c.title)} 크게 보기">
-        <span class="t-art">${conceptArt(c)}</span><span class="t-scan"></span><span class="t-cap mono">${esc(c.title)} / ${pad(CONCEPTS.length)}</span></button>`).join('');
-      return `<div class="gallery">
-        <header class="sec-head">
-          <p class="kicker mono" data-type>Concept Art · ${pad(CONCEPTS.length)}</p>
-          <h2 class="gold-title" data-wipe>컨셉아트</h2>
-          <p class="sub" data-type data-delay="700">그림을 누르면 크게 볼 수 있습니다. 아래로 스크롤해 더 보세요.</p>
-        </header>
-        <div class="mosaic">${tiles}</div>
-      </div>`;
-    },
-    notice() {
-      const list = PATCHES.map((p) => `<article class="patch" data-rise>
-        <h3 class="gold-title">${esc(p.v)}</h3><time class="date mono">${esc(p.date)}</time>
-        <ul>${p.items.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></article>`).join('');
-      return `<div class="notice">
-        <header class="sec-head">
-          <p class="kicker mono" data-type>Notice</p>
-          <h2 class="gold-title" data-wipe>공지</h2>
-        </header>${list}
-      </div>`;
-    },
-  };
-
-  /* ── 화면별 후처리 ── */
-  let heroTimer = 0, tileObs = null;
-  function stopLive() { clearInterval(heroTimer); if (tileObs) tileObs.disconnect(); tileObs = null; }
-
-  const AFTER = {
-    main(root) {
-      let cur = 0, locked = false;
-      const slides = $$('.hero-slide', root), dots = $$('.hero-dots i', root);
-      const show = (n, first) => {
-        cur = (n + CHARS.length) % CHARS.length;
-        slides.forEach((s, i) => s.classList.toggle('on', i === cur));
-        dots.forEach((d, i) => d.classList.toggle('on', i === cur));
-        $('#heroCount', root).innerHTML = `${pad(CHARS[cur].id)}<small>/ ${pad(CHARS.length)}</small>`;
-        const nm = $('#heroName', root);
-        nm.textContent = CHARS[cur].ko;
-        if (!reduce) splitText(nm, first ? 900 : 200, 20);
-        $('#heroMore', root).href = '#/char/' + CHARS[cur].id;
+  function guardImgs(scope) {
+    [].forEach.call(scope.querySelectorAll('img[data-kind]'), function (img) {
+      var fix = function () {
+        img.onerror = null;
+        var fb = fallbackSrc(img.dataset.kind, +img.dataset.id);
+        if (img.getAttribute('src') !== fb) img.src = fb;
       };
-      const step = (d) => { if (locked) return; locked = true; show(cur + d); setTimeout(() => (locked = false), 700); restart(); };
-      const restart = () => { clearInterval(heroTimer); if (!reduce) heroTimer = setInterval(() => show(cur + 1), 7000); };
-      $('.hero-nav.prev', root).onclick = () => step(-1);
-      $('.hero-nav.next', root).onclick = () => step(1);
-      show(0, true); restart();
-    },
-    gallery(root) {
-      const tiles = $$('.tile', root);
-      tileObs = new IntersectionObserver((es) => es.forEach((e) => {
-        if (e.isIntersecting) { e.target.classList.add('in'); tileObs.unobserve(e.target); }
-      }), { root, threshold: 0.12 });
-      tiles.forEach((t) => tileObs.observe(t));
-      root.onclick = (e) => { const t = e.target.closest('.tile'); if (t) openLB(+t.dataset.i); };
-    },
+      img.onerror = fix;
+      if (img.complete && img.naturalWidth === 0 && img.getAttribute('src') && img.getAttribute('src').indexOf('data:') !== 0) fix();
+    });
+  }
+
+  /* ---------- 글자 단위 등장 ---------- */
+  function split(el) {
+    if (el.classList.contains('split')) return;
+    var text = el.textContent.replace(/\s+/g, ' ').trim();
+    el.textContent = '';
+    var sr = document.createElement('span'); sr.className = 'sr'; sr.textContent = text;
+    var vis = document.createElement('span'); vis.setAttribute('aria-hidden', 'true');
+    var frag = document.createDocumentFragment(), i = 0;
+    text.split(' ').forEach(function (word, wi) {
+      if (wi) frag.appendChild(document.createTextNode(' '));
+      var chars = Array.from(word), holder = frag;
+      if (chars.length <= 14) { holder = document.createElement('span'); holder.className = 'w'; frag.appendChild(holder); }
+      chars.forEach(function (ch) {
+        var s = document.createElement('span'); s.className = 'c'; s.style.setProperty('--i', i++); s.textContent = ch; holder.appendChild(s);
+      });
+    });
+    vis.appendChild(frag); el.appendChild(sr); el.appendChild(vis);
+    el.style.setProperty('--step', Math.max(6, Math.min(24, Math.floor(900 / Math.max(i, 1)))) + 'ms');
+    el.classList.add('split');
+  }
+  function retext(el, text) {
+    el.classList.remove('split', 'is-in');
+    el.textContent = text;
+    split(el);
+    void el.offsetWidth;
+    el.classList.add('is-in');
+  }
+
+  /* ---------- 화면 컨텍스트: 정리 함수·관찰자를 한곳에서 관리 ---------- */
+  function newCtx() {
+    var ctx = { cleanups: [], io: null, started: false, starters: [] };
+    ctx.on = function (target, ev, fn, opt) { target.addEventListener(ev, fn, opt); ctx.cleanups.push(function () { target.removeEventListener(ev, fn, opt); }); };
+    ctx.watch = function (el, cb) {
+      if (!ctx.io) {
+        ctx.io = 'IntersectionObserver' in window ? new IntersectionObserver(function (es) {
+          es.forEach(function (e) { if (e.isIntersecting) { ctx.io.unobserve(e.target); e.target._cb && e.target._cb(); } });
+        }, { threshold: 0.01, rootMargin: '0px 0px -4% 0px' }) : null;
+        ctx.cleanups.push(function () { ctx.io && ctx.io.disconnect(); });
+      }
+      el._cb = cb;
+      if (ctx.io) ctx.io.observe(el); else cb();
+    };
+    ctx.text = function (scope, baseStep) {
+      [].forEach.call(scope.querySelectorAll('.rt'), function (el, k) {
+        split(el);
+        if (baseStep) el.style.setProperty('--base', (k * baseStep) + 'ms');
+        ctx.watch(el, function () { el.classList.add('is-in'); });
+      });
+    };
+    ctx.destroy = function () { ctx.cleanups.forEach(function (fn) { try { fn(); } catch (e) { } }); ctx.cleanups = []; };
+    return ctx;
+  }
+  function enterStagger(screen) {
+    [].forEach.call(screen.querySelectorAll('[data-enter]'), function (el, i) { if (!el.style.getPropertyValue('--e')) el.style.setProperty('--e', i); });
+    screen.classList.add('entering');
+  }
+  function drawIcon(el) { if (!el) return; el.classList.remove('draw'); void el.offsetWidth; el.classList.add('draw'); }
+
+  /* ================= 화면들 ================= */
+  var ROUTES = {
+    main: { n: '01', ko: '메인화면', en: 'HOME' },
+    select: { n: '02', ko: '캐릭터 선택', en: 'CHARACTER SELECT' },
+    char: { n: '02', ko: '캐릭터 소개', en: 'CHARACTER' },
+    gallery: { n: '03', ko: '컨셉아트', en: 'CONCEPT ART' },
+    notice: { n: '04', ko: '공지', en: 'NOTICE' }
   };
 
-  /* ── 라이트박스 ── */
-  const lb = $('#lightbox'); let lbI = 0, lbFrom = null;
-  function lbRender() {
-    const c = CONCEPTS[lbI];
-    $('#lbArt').innerHTML = conceptArt(c);
-    $('#lbCap').textContent = `${c.title} / ${pad(CONCEPTS.length)}`;
-  }
-  function openLB(i) { lbI = i; lbFrom = document.activeElement; lbRender(); lb.hidden = false; $('#lbClose').focus(); }
-  function closeLB() { lb.hidden = true; if (lbFrom && lbFrom.focus) lbFrom.focus(); }
-  const lbStep = (d) => { lbI = (lbI + d + CONCEPTS.length) % CONCEPTS.length; lbRender(); };
-  $('#lbClose').onclick = closeLB;
-  $('#lbPrev').onclick = () => lbStep(-1);
-  $('#lbNext').onclick = () => lbStep(1);
-  lb.addEventListener('click', (e) => { if (e.target === lb) closeLB(); });
+  /* ---- 메인 ---- */
+  function viewMain() {
+    var ctx = newCtx(), chars = D.characters, n = chars.length, idx = mod(state.main, n);
+    var el = document.createElement('section');
+    el.className = 'screen main';
+    el.setAttribute('aria-label', '메인화면');
+    var figs = chars.map(function (c, k) { return '<div class="m-fig" data-k="' + k + '" aria-hidden="' + (k === idx ? 'false' : 'true') + '">' + imgTag('char', c, '', c.name + ' 임시 일러스트', k === idx ? ' fetchpriority="high"' : '') + '</div>'; }).join('');
+    var thumbs = chars.map(function (c, k) { return '<button type="button" data-k="' + k + '" aria-label="' + esc(c.name) + ' 보기" aria-pressed="' + (k === idx) + '">' + imgTag('char', c, '', '') + '<b>' + pad(k + 1) + '</b></button>'; }).join('');
+    var rail = [
+      ['#/select', 'char', '캐릭터', 'CHARACTER', 'r-char'],
+      ['#/gallery', 'art', '컨셉아트', 'CONCEPT ART', 'r-art'],
+      ['#/notice', 'note', '공지', 'NOTICE', 'r-note'],
+      ['#/char/' + (idx + 1), 'id', '소개', 'PROFILE', 'r-intro']
+    ].map(function (r, i) { return '<a href="' + r[0] + '" id="' + r[4] + '" data-enter style="--e:' + (i + 1) + '">' + A.icon(r[1]) + '<span class="rl">' + r[2] + '</span><span class="en">' + r[3] + '</span></a>'; }).join('');
+    el.innerHTML =
+      '<div class="m-bg" aria-hidden="true">' + A.sigil() + '</div><div class="m-scan" aria-hidden="true"></div>' +
+      '<nav class="rail" aria-label="바로가기">' + rail + '</nav>' +
+      '<div class="m-stage" id="mStage" role="group" aria-roledescription="캐러셀" aria-label="캐릭터 미리보기. 좌우로 밀거나 방향키로 넘깁니다.">' + figs +
+      '<p class="m-count" aria-hidden="true"><b id="mNow">01</b><span>/' + pad(n) + '</span></p></div>' +
+      '<div class="m-info"><p class="eyebrow" id="mEn" data-enter style="--e:2"></p>' +
+      '<h1 class="m-name rt" id="mName"></h1><p class="m-intro rt" id="mIntro"></p>' +
+      '<div class="m-act" data-enter style="--e:4"><a class="btn" id="mGo" href="#/char/1"><span>소개 보기</span>' + A.icon('arrow') + '</a>' +
+      '<button class="sq" type="button" id="mPrev" aria-label="이전 캐릭터">' + A.icon('prev') + '</button>' +
+      '<button class="sq" type="button" id="mNext" aria-label="다음 캐릭터">' + A.icon('next') + '</button></div>' +
+      '<div class="m-thumbs" role="group" aria-label="캐릭터 바로 선택" data-enter style="--e:5">' + thumbs + '</div></div>';
+    guardImgs(el);
 
-  /* ── 메뉴 (우측 상단 아이콘) ── */
-  const menuBtn = $('#menuBtn'), panel = $('#menuPanel');
-  function setMenu(open) {
-    document.body.classList.toggle('menu-open', open);
-    menuBtn.setAttribute('aria-expanded', open);
-    menuBtn.setAttribute('aria-label', open ? '메뉴 닫기' : '메뉴 열기');
-    panel.inert = !open;
-  }
-  menuBtn.onclick = () => setMenu(!document.body.classList.contains('menu-open'));
-  $('#scrim').onclick = () => setMenu(false);
-  addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { if (!lb.hidden) closeLB(); else setMenu(false); }
-    if (!lb.hidden) { if (e.key === 'ArrowLeft') lbStep(-1); if (e.key === 'ArrowRight') lbStep(1); }
-  });
-
-  /* 좌측 메뉴 + 우측 패널 메뉴는 같은 데이터에서 만든다 */
-  $('#rail').innerHTML = NAV.map((n) => `<a class="rail-btn" href="#/${n.r}" data-r="${n.r}">${icon(n.icon)}<b>${n.ko}</b><small>${n.en}</small></a>`).join('');
-  $('#menuList').innerHTML = NAV.map((n, i) => `<a class="mi" style="--i:${i}" href="#/${n.r}" data-r="${n.r}">${icon(n.icon)}<b>${n.ko}</b><small>${n.en}</small></a>`).join('');
-  document.addEventListener('click', (e) => { if (e.target.closest('.mi, .rail-btn, .brand')) setMenu(false); });
-
-  /* ── 화면 전환 (슬랫 + 스캔선 + 문양) ── */
-  const tr = $('#tr'), slatBox = $('#trSlats'), line = $('#trLine'), core = $('#trCore'), label = $('#trLabel');
-  const SLATS = 10;
-  slatBox.innerHTML = '<i></i>'.repeat(SLATS);
-  const slats = [...slatBox.children];
-
-  async function transition(text, mid) {
-    if (reduce) { await mid(); return; }
-    label.textContent = text;
-    tr.classList.add('on');
-    slats.forEach((s) => (s.style.transformOrigin = 'top'));
-    const inA = slats.map((s, i) => s.animate([{ transform: 'scaleY(0)' }, { transform: 'scaleY(1)' }], { duration: 380, delay: i * 26, easing: 'cubic-bezier(.7,0,.2,1)', fill: 'forwards' }));
-    line.animate([{ top: '0%', opacity: 1 }, { top: '100%', opacity: 1 }], { duration: 640, easing: 'ease-in', fill: 'forwards' });
-    core.animate([{ opacity: 0, transform: 'translate(-50%,-50%) scale(.7)' }, { opacity: 1, transform: 'translate(-50%,-50%) scale(1)' }], { duration: 360, delay: 220, easing: 'cubic-bezier(.2,.7,.2,1)', fill: 'forwards' });
-    await Promise.all(inA.map((a) => a.finished));
-    await mid();
-    await sleep(180);
-    slats.forEach((s) => (s.style.transformOrigin = 'bottom'));
-    const outA = slats.map((s, i) => s.animate([{ transform: 'scaleY(1)' }, { transform: 'scaleY(0)' }], { duration: 380, delay: (SLATS - i) * 26, easing: 'cubic-bezier(.7,0,.2,1)', fill: 'forwards' }));
-    core.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 240, fill: 'forwards' });
-    line.animate([{ top: '100%', opacity: 1 }, { top: '0%', opacity: 0 }], { duration: 560, easing: 'ease-out', fill: 'forwards' });
-    await Promise.all(outA.map((a) => a.finished));
-    tr.getAnimations({ subtree: true }).forEach((a) => a.cancel());
-    tr.classList.remove('on');
-  }
-
-  /* ── 라우터 ── */
-  const TITLES = { main: '메인', select: '캐릭터', char: '캐릭터', gallery: '컨셉아트', notice: '공지' };
-  let current = '', busy = false, pending = null;
-
-  function parse() {
-    const m = location.hash.replace(/^#\/?/, '').split('/');
-    const name = VIEWS[m[0]] ? m[0] : 'main';
-    return { name, arg: name === 'char' ? parseInt(m[1], 10) || 1 : null, key: name === 'char' ? 'char/' + (parseInt(m[1], 10) || 1) : name };
-  }
-  function mount(route) {
-    stopLive();
-    $$('.screen').forEach((s) => (s.hidden = true));
-    const root = $('#s-' + route.name);
-    root.hidden = false;
-    root.onclick = null;
-    root.innerHTML = VIEWS[route.name](route.arg);
-    root.scrollTop = 0;
-    play(root);
-    if (AFTER[route.name]) AFTER[route.name](root);
-    const group = route.name === 'char' ? 'select' : route.name;
-    $$('.rail-btn, .mi').forEach((a) => a.classList.toggle('on', a.dataset.r === group));
-    document.title = (route.name === 'main' ? '' : TITLES[route.name] + ' · ') + 'Rasyancut World';
-  }
-  async function render() {
-    const route = parse();
-    if (route.key === current) return;
-    if (busy) { pending = true; return; }
-    busy = true;
-    const first = current === '';
-    current = route.key;
-    await transition((first ? 'BOOT' : 'TRANSIT') + ' // ' + TITLES[route.name], () => mount(route));
-    busy = false;
-    if (pending) { pending = false; render(); }
-  }
-  addEventListener('hashchange', render);
-  render();
-
-  /* ── 금가루 파티클 ── */
-  (function dust() {
-    const c = $('#dust'), x = c.getContext('2d');
-    let w, h, dpr, ps = [];
-    const spr = document.createElement('canvas'); spr.width = spr.height = 32;
-    const sx = spr.getContext('2d'), g = sx.createRadialGradient(16, 16, 0, 16, 16, 16);
-    g.addColorStop(0, 'rgba(255,243,196,1)'); g.addColorStop(.3, 'rgba(242,210,122,.55)'); g.addColorStop(1, 'rgba(212,167,58,0)');
-    sx.fillStyle = g; sx.fillRect(0, 0, 32, 32);
-    function size() {
-      dpr = Math.min(devicePixelRatio || 1, 2);
-      w = c.width = innerWidth * dpr; h = c.height = innerHeight * dpr;
-      const n = innerWidth < 700 ? 8 : 16;
-      ps = Array.from({ length: n }, () => ({ x: Math.random() * w, y: Math.random() * h, s: (1 + Math.random() * 3) * dpr, v: (.08 + Math.random() * .25) * dpr, ph: Math.random() * 6.28, a: .12 + Math.random() * .4 }));
+    var figEls = [].slice.call(el.querySelectorAll('.m-fig')), thumbEls = [].slice.call(el.querySelectorAll('.m-thumbs button'));
+    var nameEl = el.querySelector('#mName'), introEl = el.querySelector('#mIntro'), enEl = el.querySelector('#mEn'), nowEl = el.querySelector('#mNow'), goEl = el.querySelector('#mGo'), introLink = el.querySelector('#r-intro');
+    function show(i, announce, animate) {
+      idx = mod(i, n); state.main = idx; var c = chars[idx];
+      figEls.forEach(function (f, k) { f.classList.toggle('on', k === idx); f.classList.toggle('before', k < idx); f.setAttribute('aria-hidden', k === idx ? 'false' : 'true'); });
+      thumbEls.forEach(function (t, k) { t.setAttribute('aria-pressed', String(k === idx)); });
+      nowEl.textContent = pad(idx + 1); enEl.textContent = c.en + ' / ' + pad(n);
+      goEl.setAttribute('href', '#/char/' + c.id); introLink.setAttribute('href', '#/char/' + c.id);
+      goEl.setAttribute('aria-label', c.name + ' 소개 보기');
+      if (animate) { retext(nameEl, c.name); retext(introEl, c.short); } else { nameEl.textContent = c.name; introEl.textContent = c.short; }
+      if (announce) live.textContent = c.name + ', ' + pad(idx + 1) + ' / ' + pad(n);
     }
-    function draw(t) {
-      x.clearRect(0, 0, w, h); x.globalCompositeOperation = 'lighter';
-      for (const p of ps) {
-        p.y -= p.v; if (p.y < -20) { p.y = h + 20; p.x = Math.random() * w; }
-        const px = p.x + Math.sin(t / 2200 + p.ph) * 14 * dpr;
-        x.globalAlpha = p.a * (.55 + .45 * Math.sin(t / 900 + p.ph));
-        x.drawImage(spr, px - p.s * 2, p.y - p.s * 2, p.s * 4, p.s * 4);
+    show(idx, false, false);
+    ctx.on(el.querySelector('#mPrev'), 'click', function () { show(idx - 1, true, true); });
+    ctx.on(el.querySelector('#mNext'), 'click', function () { show(idx + 1, true, true); });
+    thumbEls.forEach(function (t) { ctx.on(t, 'click', function () { show(+t.dataset.k, true, true); }); });
+    ctx.on(document, 'keydown', function (e) {
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || root.classList.contains('menu-open')) return;
+      var tag = (e.target && e.target.tagName) || '';
+      if (/INPUT|TEXTAREA|SELECT/.test(tag)) return;
+      if (e.key === 'ArrowLeft') show(idx - 1, true, true);
+      else if (e.key === 'ArrowRight') show(idx + 1, true, true);
+    });
+    var stage = el.querySelector('#mStage'), sx = 0, sy = 0, tracking = false;
+    ctx.on(stage, 'pointerdown', function (e) { sx = e.clientX; sy = e.clientY; tracking = true; });
+    ctx.on(stage, 'pointerup', function (e) {
+      if (!tracking) return; tracking = false;
+      var dx = e.clientX - sx, dy = e.clientY - sy;
+      if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.4) show(idx + (dx < 0 ? 1 : -1), true, true);
+    });
+    ctx.on(stage, 'pointercancel', function () { tracking = false; });
+
+    return {
+      el: el, ctx: ctx,
+      start: function () {
+        enterStagger(el);
+        [nameEl, introEl].forEach(function (t) { split(t); t.classList.add('is-in'); });
+        [].forEach.call(el.querySelectorAll('.rail a'), function (a) { drawIcon(a); });
+        nameEl.style.setProperty('--base', '200ms'); introEl.style.setProperty('--base', '420ms');
       }
-      if (!reduce) requestAnimationFrame(draw);
+    };
+  }
+
+  /* ---- 캐릭터 선택 ---- */
+  function viewSelect() {
+    var ctx = newCtx(), chars = D.characters, n = chars.length, sel = mod(state.sel, n);
+    var el = document.createElement('section');
+    el.className = 'screen select';
+    el.setAttribute('aria-label', '캐릭터 선택');
+    var cards = chars.map(function (c, k) {
+      return '<button type="button" class="card" data-k="' + k + '" aria-pressed="' + (k === sel) + '" aria-label="' + esc(c.name) + ', ' + pad(k + 1) + ' / ' + pad(n) + '">' +
+        '<span class="rim"></span><span class="in"><span class="art">' + imgTag('char', c, '', '') + '</span><span class="band-b"></span>' +
+        '<span class="band"><span class="emb">' + A.emblem(k + 1) + '</span><span class="nm">' + esc(c.name) + '</span><span class="cd">' + esc(c.code) + '</span><span class="go">소개 보기 →</span></span></span></button>';
+    }).join('');
+    el.innerHTML =
+      '<div class="s-wrap"><header class="s-head" data-enter><p class="eyebrow">STEP 01 — CHARACTER SELECT</p>' +
+      '<h1 class="s-title">캐릭터 선택</h1><p class="s-lead rt">소개를 볼 캐릭터를 고르세요.</p></header>' +
+      '<div class="cards" role="group" aria-label="캐릭터 목록" data-enter style="--e:2">' + cards + '</div></div>' +
+      '<div class="s-bar" data-enter style="--e:4"><p class="s-sel"><span class="eyebrow">선택됨</span><span class="nm" id="sName"></span></p>' +
+      '<a class="btn" id="sGo" href="#/char/1"><span>소개 보기</span>' + A.icon('arrow') + '</a></div>';
+    guardImgs(el);
+    var cardEls = [].slice.call(el.querySelectorAll('.card')), sName = el.querySelector('#sName'), sGo = el.querySelector('#sGo');
+    function pick(k, focus) {
+      sel = mod(k, n); state.sel = sel; state.main = sel; var c = chars[sel];
+      cardEls.forEach(function (b, i) { b.setAttribute('aria-pressed', String(i === sel)); });
+      sName.textContent = c.name; sGo.setAttribute('href', '#/char/' + c.id); sGo.setAttribute('aria-label', c.name + ' 소개 보기');
+      drawIcon(cardEls[sel]);
+      if (focus) cardEls[sel].focus();
+      live.textContent = c.name + ' 선택됨';
     }
-    size(); addEventListener('resize', size);
-    requestAnimationFrame(draw);
-  })();
+    pick(sel, false);
+    cardEls.forEach(function (b) {
+      ctx.on(b, 'click', function () {
+        var k = +b.dataset.k;
+        if (k === sel) { location.hash = '#/char/' + chars[k].id; } else pick(k, false);
+      });
+      ctx.on(b, 'keydown', function (e) {
+        var d = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? 1 : (e.key === 'ArrowLeft' || e.key === 'ArrowUp') ? -1 : 0;
+        if (d) { e.preventDefault(); pick(+b.dataset.k + d, true); }
+      });
+    });
+    return { el: el, ctx: ctx, start: function () { enterStagger(el); ctx.text(el); drawIcon(cardEls[sel]); } };
+  }
+
+  /* ---- 캐릭터 소개 ---- */
+  function viewChar(t) {
+    var ctx = newCtx(), chars = D.characters, n = chars.length, k = mod(t.id - 1, n), c = chars[k];
+    state.main = k; state.sel = k;
+    var prev = chars[mod(k - 1, n)], next = chars[mod(k + 1, n)];
+    var el = document.createElement('section');
+    el.className = 'screen char';
+    el.setAttribute('aria-label', c.name + ' 소개');
+    el.innerHTML =
+      '<div class="c-stage" data-enter><div class="c-band" aria-hidden="true"></div><div class="c-line" aria-hidden="true"></div><div class="c-line l2" aria-hidden="true"></div>' +
+      '<p class="c-ghost" aria-hidden="true">CHARACTER</p><p class="c-plus" aria-hidden="true">++++</p>' +
+      '<div class="c-fig">' + imgTag('char', c, '', c.name + ' 임시 일러스트', ' fetchpriority="high"') + '</div>' +
+      (c.img ? '' : '<p class="c-tmp">임시 일러스트 — 실제 그림으로 교체 예정</p>') + '</div>' +
+      '<div class="c-text"><div class="c-code" data-enter style="--e:1"><span class="eyebrow">' + esc(c.en) + '</span><b>' + pad(k + 1) + '<span class="dim"> / ' + pad(n) + '</span></b></div>' +
+      '<h1 class="c-name rt" data-enter style="--e:2">' + esc(c.name) + '</h1>' +
+      '<div class="c-intro">' + c.intro.map(function (p) { return '<p class="rt">' + esc(p) + '</p>'; }).join('') + '</div>' +
+      '<dl class="c-specs" data-enter style="--e:4">' + c.specs.map(function (s) { return '<div><dt>' + esc(s[0]) + '</dt><dd>' + esc(s[1]) + '</dd></div>'; }).join('') + '</dl>' +
+      '<div class="c-nav" data-enter style="--e:5"><a class="sq" href="#/char/' + prev.id + '" aria-label="이전 캐릭터: ' + esc(prev.name) + '">' + A.icon('prev') + '</a>' +
+      '<a class="sq" href="#/char/' + next.id + '" aria-label="다음 캐릭터: ' + esc(next.name) + '">' + A.icon('next') + '</a>' +
+      '<a class="btn" href="#/select"><span>다른 캐릭터 고르기</span>' + A.icon('grid') + '</a></div></div>';
+    guardImgs(el);
+    ctx.on(document, 'keydown', function (e) {
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || root.classList.contains('menu-open')) return;
+      if (e.key === 'ArrowLeft') location.hash = '#/char/' + prev.id;
+      else if (e.key === 'ArrowRight') location.hash = '#/char/' + next.id;
+    });
+    return { el: el, ctx: ctx, start: function () { enterStagger(el); ctx.text(el, 160); } };
+  }
+
+  /* ---- 컨셉아트 ---- */
+  function viewGallery() {
+    var ctx = newCtx(), items = D.concept, total = items.length;
+    var el = document.createElement('section');
+    el.className = 'screen gal';
+    el.setAttribute('aria-label', '컨셉아트');
+    var rows = '';
+    for (var r = 0; r * 3 < total; r++) {
+      rows += '<p class="g-set" aria-hidden="true">' + pad(r * 3 + 1) + ' — ' + pad(Math.min(r * 3 + 3, total)) + '</p><div class="g-row">';
+      for (var j = 0; j < 3 && r * 3 + j < total; j++) {
+        var it = items[r * 3 + j], big = j === 2;
+        rows += '<button type="button" class="plate ' + (big ? 'big' : 'small') + '" data-k="' + (r * 3 + j) + '" aria-label="' + esc(it.title) + ' 크게 보기, ' + pad(it.id) + ' / ' + pad(total) + '">' +
+          '<span class="pl-in">' + imgTag('concept', it, '', '', ' loading="lazy"') + '<span class="pl-tag">' + pad(it.id) + '<em>/ ' + pad(total) + '</em></span><span class="pl-ex">' + A.icon('expand') + '</span></span><span class="pl-frame"></span></button>';
+      }
+      rows += '</div>';
+    }
+    el.innerHTML =
+      '<header class="g-head" data-enter><p class="eyebrow">ARCHIVE — ' + pad(total) + ' PLATES</p><h1 class="g-title">Concept<span>Art</span></h1>' +
+      '<div class="g-sub"><p class="g-lead rt">아래로 스크롤하며 컨셉아트를 둘러보세요. 그림을 누르면 크게 볼 수 있습니다.</p></div></header>' +
+      '<div class="g-rows">' + rows + '</div>';
+    guardImgs(el);
+
+    var plates = [].slice.call(el.querySelectorAll('.plate'));
+    /* 라이트박스(<dialog>) */
+    var dlg = null, lbIdx = 0, lastBtn = null;
+    if (typeof HTMLDialogElement === 'function') {
+      dlg = document.createElement('dialog');
+      dlg.className = 'lb'; dlg.setAttribute('aria-label', '컨셉아트 크게 보기');
+      dlg.innerHTML = '<img class="lb-img" alt="" data-kind="concept" data-id="1"><div class="lb-bar"><p class="lb-cap"></p>' +
+        '<button type="button" class="sq" data-a="prev" aria-label="이전 그림">' + A.icon('prev') + '</button><button type="button" class="sq" data-a="next" aria-label="다음 그림">' + A.icon('next') + '</button>' +
+        '<button type="button" class="sq" data-a="close" aria-label="닫기">' + A.icon('close') + '</button></div>';
+      document.body.appendChild(dlg);
+      var lbImg = dlg.querySelector('.lb-img'), lbCap = dlg.querySelector('.lb-cap');
+      var fillLb = function (i) {
+        lbIdx = mod(i, total); var it = items[lbIdx];
+        lbImg.dataset.id = it.id; lbImg.alt = it.title; lbImg.src = src('concept', it);
+        lbCap.innerHTML = '<b>' + esc(it.title) + '</b> &nbsp; ' + pad(it.id) + ' / ' + pad(total);
+        guardImgs(dlg);
+      };
+      ctx.on(dlg, 'click', function (e) {
+        var a = e.target.closest && e.target.closest('[data-a]');
+        if (a) { var act = a.dataset.a; if (act === 'close') dlg.close(); else fillLb(lbIdx + (act === 'next' ? 1 : -1)); }
+        else if (e.target === dlg) dlg.close();
+      });
+      ctx.on(dlg, 'keydown', function (e) {
+        if (e.key === 'ArrowLeft') fillLb(lbIdx - 1); else if (e.key === 'ArrowRight') fillLb(lbIdx + 1);
+      });
+      ctx.on(dlg, 'close', function () { root.classList.remove('lb-open'); if (lastBtn && document.contains(lastBtn)) lastBtn.focus({ preventScroll: true }); });
+      plates.forEach(function (p) {
+        ctx.on(p, 'click', function () { lastBtn = p; fillLb(+p.dataset.k); root.classList.add('lb-open'); if (!dlg.open) dlg.showModal(); dlg.querySelector('[data-a="close"]').focus(); });
+      });
+      ctx.cleanups.push(function () { try { if (dlg.open) dlg.close(); } catch (e) { } root.classList.remove('lb-open'); dlg.remove(); });
+    }
+    return {
+      el: el, ctx: ctx,
+      start: function () {
+        enterStagger(el); ctx.text(el);
+        plates.forEach(function (p) { ctx.watch(p, function () { p.classList.add('in'); }); });
+      }
+    };
+  }
+
+  /* ---- 공지 ---- */
+  function viewNotice() {
+    var ctx = newCtx();
+    var el = document.createElement('section');
+    el.className = 'screen notice';
+    el.setAttribute('aria-label', '공지');
+    var list = D.notices.map(function (p, i) {
+      var groups = p.groups.map(function (g) {
+        return '<div class="pg"><h3>' + esc(g.h) + '</h3><ul>' + g.items.map(function (t) { return '<li class="rt">' + esc(t) + '</li>'; }).join('') + '</ul></div>';
+      }).join('');
+      return '<details class="patch"' + (i === 0 ? ' open' : '') + ' data-enter style="--e:' + (i + 2) + '"><summary><span class="ps"><span class="pv">' + esc(p.v) + '</span>' +
+        '<span class="pdate">' + esc(p.date) + '</span>' + (p.badge ? '<span class="pbadge">' + esc(p.badge) + '</span>' : '') + '</span><span class="ptog" aria-hidden="true"></span></summary>' +
+        '<div class="pbody">' + (p.summary ? '<p class="psum rt">' + esc(p.summary) + '</p>' : '') + groups + '</div></details>';
+    }).join('');
+    el.innerHTML = '<div class="n-wrap"><header class="n-head" data-enter><p class="eyebrow">NOTICE — PATCH NOTES</p><h1 class="n-title">공지</h1></header><div class="n-list">' + list + '</div></div>';
+    return { el: el, ctx: ctx, start: function () { enterStagger(el); ctx.text(el, 40); } };
+  }
+
+  /* ---- 오류(어떤 화면이 죽어도 사이트 자체는 산다) ---- */
+  function viewError() {
+    var ctx = newCtx();
+    var el = document.createElement('section');
+    el.className = 'screen';
+    el.innerHTML = '<div class="err"><p class="eyebrow">ERROR</p><h1 class="s-title">화면을 불러오지 못했습니다</h1><p class="dim">잠시 후 다시 시도하거나 메인화면으로 돌아가세요.</p><a class="btn" href="#/main"><span>메인화면으로</span></a></div>';
+    return { el: el, ctx: ctx, start: function () { } };
+  }
+
+  var VIEWS = { main: viewMain, select: viewSelect, char: viewChar, gallery: viewGallery, notice: viewNotice };
+
+  /* ================= 라우터 ================= */
+  function canon(raw) {
+    var h = (raw || '').replace(/^#\/?/, ''), parts = h.split('/'), name = parts[0], t;
+    if (name === 'char') {
+      var id = parseInt(parts[1], 10);
+      if (!(id >= 1 && id <= D.characters.length) || String(id) !== parts[1]) t = { name: 'select', key: 'select', hash: '#/select' };
+      else t = { name: 'char', id: id, key: 'char/' + id, hash: '#/char/' + id };
+    } else if (VIEWS[name] && parts.length === 1) t = { name: name, key: name, hash: '#/' + name };
+    else t = { name: 'main', key: 'main', hash: '#/main' };
+    if (location.hash !== t.hash) { try { history.replaceState(null, '', t.hash); } catch (e) { location.hash = t.hash; } }
+    return t;
+  }
+
+  function setMeta(t) {
+    var r = ROUTES[t.name];
+    root.dataset.screen = t.name;
+    var label = t.name === 'char' ? D.characters[t.id - 1].name + ' 소개' : r.ko;
+    document.title = label + ' · 라시안컷 월드';
+    hudWhere.textContent = r.n + ' / ' + r.en;
+    live.textContent = label + ' 화면';
+    [].forEach.call(menu.querySelectorAll('a[data-route]'), function (a) {
+      var on = a.dataset.route === t.name || (t.name === 'char' && a.dataset.route === 'select');
+      if (a.dataset.char) on = t.name === 'char' && +a.dataset.char === t.id;
+      if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    });
+  }
+
+  function render(t) {
+    if (current) { try { current.ctx.destroy(); } catch (e) { } }
+    var v;
+    try { v = VIEWS[t.name](t); } catch (err) { console.error('[view]', t.key, err); v = viewError(); }
+    view.replaceChildren(v.el);
+    current = v;
+    setMeta(t);
+    try { window.scrollTo(0, 0); } catch (e) { }
+    return v;
+  }
+  function startView(v) { try { v.start(); } catch (err) { console.error('[start]', err); } }
+
+  /* 전환: 틈(slat) 6장이 위에서 내려와 덮고, 같은 방향으로 빠져나간다. */
+  var DUR = 240, STAG = 32, EASE = 'cubic-bezier(.7,0,.3,1)';
+  function slatAnim(s, i, dir) {
+    var sk = ' skewX(-14deg)';
+    var kf = dir === 'in' ? [{ transform: 'translateY(-101%)' + sk }, { transform: 'translateY(0)' + sk }] : [{ transform: 'translateY(0)' + sk }, { transform: 'translateY(101%)' + sk }];
+    return s.animate(kf, { duration: DUR, delay: (dir === 'in' ? i : slats.length - 1 - i) * STAG, easing: EASE, fill: 'forwards' });
+  }
+  function runSlats(dir) {
+    var anims = slats.map(function (s, i) { return slatAnim(s, i, dir); });
+    var total = DUR + (slats.length - 1) * STAG;
+    return Promise.race([Promise.all(anims.map(function (a) { return a.finished; })), sleep(total + 400)]).catch(function () { });
+  }
+  function clearCurtain() {
+    slats.forEach(function (s) { try { s.getAnimations().forEach(function (a) { a.cancel(); }); } catch (e) { } });
+    curtain.classList.remove('on', 'covered');
+  }
+  function labelCurtain(t) {
+    var r = ROUTES[t.name];
+    $('clNum').textContent = r.n;
+    $('clText').textContent = t.name === 'char' ? D.characters[t.id - 1].name + ' 소개' : r.ko;
+  }
+  async function cover(t) {
+    if (reduced() || !slats[0].animate) return;
+    labelCurtain(t);
+    curtain.classList.add('on');
+    await runSlats('in');
+    curtain.classList.add('covered');
+  }
+  async function reveal() {
+    if (!curtain.classList.contains('on')) return;
+    curtain.classList.remove('covered');
+    await runSlats('out');
+    clearCurtain();
+  }
+
+  /* 메인 메뉴 */
+  var lastFocus = null;
+  function menuIsOpen() { return root.classList.contains('menu-open'); }
+  function openMenu() {
+    if (menuIsOpen()) return;
+    lastFocus = document.activeElement;
+    root.classList.add('menu-open');
+    menu.inert = false; view.inert = true;
+    menuBtn.setAttribute('aria-expanded', 'true'); menuBtn.setAttribute('aria-label', '메인 메뉴 닫기');
+    var first = menu.querySelector('a');
+    setTimeout(function () { if (menuIsOpen() && first) first.focus({ preventScroll: true }); }, 60);
+  }
+  function closeMenu(skipFocus) {
+    if (!menuIsOpen()) return;
+    root.classList.remove('menu-open');
+    menu.inert = true; view.inert = false;
+    menuBtn.setAttribute('aria-expanded', 'false'); menuBtn.setAttribute('aria-label', '메인 메뉴 열기');
+    if (!skipFocus) menuBtn.focus({ preventScroll: true });
+  }
+  function buildMenu() {
+    var items = [['main', '01', '메인화면', 'HOME', 'home'], ['select', '02', '캐릭터 선택', 'CHARACTER', 'char'], ['gallery', '03', '컨셉아트', 'CONCEPT ART', 'art'], ['notice', '04', '공지', 'NOTICE', 'note']];
+    menu.innerHTML = '<p class="menu-label">MENU</p><ul class="menu-list">' +
+      items.map(function (it, i) { return '<li style="--i:' + i + '"><a href="#/' + it[0] + '" data-route="' + it[0] + '"><span class="mn">' + it[1] + '</span><span class="mk">' + it[2] + '</span><span class="me">' + it[3] + '</span></a></li>'; }).join('') +
+      '</ul><p class="menu-label">CHARACTER</p><ol class="menu-chars">' +
+      D.characters.map(function (c, i) { return '<li style="--i:' + (i + 4) + '"><a href="#/char/' + c.id + '" data-route="char" data-char="' + c.id + '" aria-label="' + esc(c.name) + ' 소개">' + pad(c.id) + '</a></li>'; }).join('') +
+      '</ol><p class="menu-foot">금색 × 검정 · 임시 일러스트 사용 중</p>';
+    menuBtn.addEventListener('click', function () { menuIsOpen() ? closeMenu() : openMenu(); });
+    $('scrim').addEventListener('click', function () { closeMenu(); });
+    menu.addEventListener('click', function (e) { if (e.target.closest && e.target.closest('a')) closeMenu(true); });
+    document.addEventListener('keydown', function (e) {
+      if (!menuIsOpen()) return;
+      if (e.key === 'Escape') { e.preventDefault(); closeMenu(); return; }
+      if (e.key === 'Tab') {
+        var links = menu.querySelectorAll('a'), first = links[0], last = links[links.length - 1];
+        if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); menuBtn.focus(); }
+        else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); menuBtn.focus(); }
+      }
+    });
+    $('brand').addEventListener('click', function () { closeMenu(true); });
+  }
+
+  /* 어떤 순서로 해시가 바뀌어도 마지막 해시로 수렴한다. */
+  async function run(first) {
+    busy = true;
+    try {
+      var guard = 0;
+      do {
+        var t = canon(location.hash);
+        if (!first && t.key === rendered) break;
+        if (!first) { navCount++; await cover(t); }
+        closeMenu(true);
+        var t2 = canon(location.hash);              // 덮는 동안 바뀌었을 수 있으니 최신값으로 그린다
+        var v = render(t2); rendered = t2.key;
+        await frames(2);
+        startView(v);
+        if (first) { var b = $('boot'); if (b) b.remove(); } else { await reveal(); view.focus({ preventScroll: true }); }
+        first = false;
+      } while (canon(location.hash).key !== rendered && ++guard < 40);
+    } catch (err) {
+      console.error('[router]', err);
+      try { clearCurtain(); } catch (e) { }
+    } finally {
+      busy = false; clearCurtain();
+    }
+  }
+  function onHash() { if (!busy) run(false); }
+
+  function boot() {
+    try { if ('scrollRestoration' in history) history.scrollRestoration = 'manual'; } catch (e) { }
+    if (!D || !A) { view.innerHTML = '<div class="err"><p class="eyebrow">ERROR</p><h1 class="s-title">데이터를 불러오지 못했습니다</h1></div>'; return; }
+    $('brandSeal').innerHTML = A.seal();
+    buildMenu();
+    $('skip').addEventListener('click', function () { view.focus(); });
+    window.addEventListener('hashchange', onHash);
+    document.addEventListener('visibilitychange', function () { if (document.hidden) root.setAttribute('data-hidden', ''); else root.removeAttribute('data-hidden'); });
+    window.addEventListener('pageshow', function (e) { if (e.persisted) { clearCurtain(); onHash(); } });
+    run(true);
+  }
+  boot();
+
+  window.__rc = { state: state, get busy() { return busy; }, get navCount() { return navCount; }, get rendered() { return rendered; } };
 })();
