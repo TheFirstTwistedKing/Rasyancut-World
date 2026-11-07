@@ -289,8 +289,8 @@
     function size() {
       dpr = Math.min(devicePixelRatio || 1, 2);
       w = c.width = innerWidth * dpr; h = c.height = innerHeight * dpr;
-      const n = innerWidth < 700 ? 34 : 80;
-      ps = Array.from({ length: n }, () => ({ x: Math.random() * w, y: Math.random() * h, s: (1.5 + Math.random() * 5) * dpr, v: (.08 + Math.random() * .3) * dpr, ph: Math.random() * 6.28, a: .15 + Math.random() * .6 }));
+      const n = innerWidth < 700 ? 8 : 16;
+      ps = Array.from({ length: n }, () => ({ x: Math.random() * w, y: Math.random() * h, s: (1 + Math.random() * 3) * dpr, v: (.08 + Math.random() * .25) * dpr, ph: Math.random() * 6.28, a: .12 + Math.random() * .4 }));
     }
     function draw(t) {
       x.clearRect(0, 0, w, h); x.globalCompositeOperation = 'lighter';

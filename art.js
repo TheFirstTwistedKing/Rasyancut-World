@@ -38,7 +38,7 @@
     for (let i = 0; i < n; i++) {
       const x = r() * W, y = r() * H, l = 6 + r() * 26, a = -0.6 + r() * 0.3;
       const x2 = x + Math.cos(a) * l, y2 = y + Math.sin(a) * l;
-      s += `<path d="M${f(x)} ${f(y)} L${f(x2)} ${f(y2)} L${f(x + l * 0.2)} ${f(y + l * 0.25)}Z" fill="url(#${id}g)" opacity="${f(0.12 + r() * 0.45)}"/>`;
+      s += `<path d="M${f(x)} ${f(y)} L${f(x2)} ${f(y2)} L${f(x + l * 0.2)} ${f(y + l * 0.25)}Z" fill="url(#${id}g)" opacity="${f(0.1 + r() * 0.3)}"/>`;
     }
     return s;
   }
@@ -81,16 +81,25 @@
       detail = `<path d="M162 354 H238" stroke="${G[100]}" stroke-width="2.6" stroke-linecap="round"/>
         <path d="M200 290 V440" stroke="${G[900]}" stroke-width="1"/>`;
     }
+    // 1~3번과 4~6번이 같은 머리 모양이라도 달라 보이도록: 크기 차이 + 4~6번은 비대칭 어깨 장식과 후광 고리
+    const sc = [1, 0.94, 1.06, 0.9, 1.02, 0.97][(seed - 1) % 6];
+    const adv = seed > 3;
+    const extra = adv
+      ? `<path d="M40 570 C46 520 92 482 150 462 L138 512 C104 522 78 540 62 570Z" fill="#070605" stroke="url(#${id}g)" stroke-width="2" stroke-linejoin="round"/>
+         <circle cx="200" cy="300" r="76" fill="none" stroke="${G[500]}" stroke-width="1.2" stroke-dasharray="4 8" opacity=".7"/>`
+      : '';
     const shape = `<path d="${BODY}"/>${head}`;
     const sh = r() * 40;
     return `<svg class="art" viewBox="0 0 400 600" preserveAspectRatio="xMidYMid slice" role="img" aria-label="캐릭터 일러스트 자리 ${seed}">
       ${defs(id)}
       <rect width="400" height="600" fill="url(#${id}r)"/>
       ${sigil(id, 200, 270, 150 + sh * 0.3)}
-      ${shards(r, 34, 400, 600, id)}
-      <g filter="url(#${id}b)" opacity=".6" fill="none" stroke="url(#${id}g)" stroke-width="5">${shape}</g>
-      <g fill="#070605" stroke="url(#${id}g)" stroke-width="2" stroke-linejoin="round">${shape}</g>
-      ${detail}
+      ${shards(r, 14, 400, 600, id)}
+      <g transform="translate(200 600) scale(${sc}) translate(-200 -600)">
+        <g filter="url(#${id}b)" opacity=".6" fill="none" stroke="url(#${id}g)" stroke-width="5">${shape}</g>
+        <g fill="#070605" stroke="url(#${id}g)" stroke-width="2" stroke-linejoin="round">${shape}</g>
+        ${detail}${extra}
+      </g>
       <path d="M92 520 C130 480 170 470 200 470 C230 470 270 480 308 520" fill="none" stroke="${G[700]}" stroke-width="1" opacity=".7"/>
       <rect y="380" width="400" height="220" fill="url(#${id}f)"/>
     </svg>`;
@@ -150,7 +159,7 @@
         <linearGradient id="${id}s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#050505"/><stop offset="1" stop-color="#3a2a0c"/></linearGradient>
       </defs>
       <rect width="640" height="360" fill="url(#${id}r)"/>
-      ${s}${shards(r, 26, 640, 360, id)}
+      ${s}${shards(r, 10, 640, 360, id)}
     </svg>`;
   }
 
